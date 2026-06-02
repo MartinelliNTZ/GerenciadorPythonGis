@@ -1,0 +1,50 @@
+*.pyc
+*.keras
+*.html
+*.csv
+*.log
+__pycache__/
+__pycache__
+*.pth
+*.rar
+*.dbf
+*.tif
+*.log   
+*.shp
+*.prj
+*.shx
+*.cpg
+*.zip
+*.PNG
+*.XML
+*.QIX
+*.aux
+*.qmd
+Simulador Habitacional CAIXA_files
+*.pyc
+*.keras
+*.html
+*.csv
+*.log
+__pycache__/
+*.pth
+*.0
+*.geojson
+*.json
+report
+# Ambiente virtual Python
+venv/
+.venv/
+.venv
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# Build
+build/
+dist/
