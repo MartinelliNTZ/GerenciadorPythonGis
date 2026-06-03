@@ -86,6 +86,7 @@ Esta ferramenta resolve isso com uma interface gráfica simples que:
 | PySide6   | 6.4+          |
 
 > **Nota:** O QGIS em si **não** é obrigatório para rodar a ferramenta. Você pode instalá-la em qualquer Python com PySide6 disponível.
+> Se o `PySide6` não estiver instalado, o script tentará instalá-lo automaticamente no Python que está executando.
 
 ---
 
@@ -98,11 +99,13 @@ git clone https://github.com/seu-usuario/qgis-package-manager.git
 cd qgis-package-manager
 ```
 
-### 2. Instale a dependência
+### 2. Instale a dependência (opcional)
 
 ```bash
 pip install PySide6
 ```
+
+> Se você não instalar manualmente, o script tentará instalar o `PySide6` automaticamente ao ser executado.
 
 ### 3. Execute
 

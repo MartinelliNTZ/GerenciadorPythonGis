@@ -23,6 +23,28 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
 
+
+def _ensure_pyside6() -> None:
+    try:
+        import PySide6  # type: ignore
+    except ModuleNotFoundError:
+        print("PySide6 não encontrado. Instalando via pip...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "PySide6"])
+        print("PySide6 instalado. Reiniciando importações...")
+    else:
+        version = getattr(PySide6, "__version__", "0.0.0")
+        try:
+            major, minor, *_ = map(int, version.split("."))
+        except Exception:
+            return
+        if (major, minor) < (6, 4):
+            print(f"Versão do PySide6 ({version}) é inferior à 6.4. Atualizando...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "PySide6"])
+            print("PySide6 atualizado.")
+
+
+_ensure_pyside6()
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QRadioButton, QButtonGroup, QPushButton, QTextEdit,
