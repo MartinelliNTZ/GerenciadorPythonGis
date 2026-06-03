@@ -235,28 +235,28 @@ class QGISPkgManager(QWidget):
         root.setSpacing(0)
         root.setContentsMargins(0, 0, 0, 0)
 
-        # ══ CABEÇALHO: Título + versão ═══════════════════════════════════════
+        # ══ CABEÇALHO: duas linhas ════════════════════════════════════════════
         header = QFrame()
         header.setObjectName("header")
-        h_lay = QHBoxLayout(header)
-        h_lay.setContentsMargins(20, 10, 20, 10)
-        h_lay.setSpacing(0)
+        h_lay = QVBoxLayout(header)
+        h_lay.setContentsMargins(20, 8, 20, 8)
+        h_lay.setSpacing(4)
 
-        # Bloco título + versão (coluna esquerda)
-        title_col = QVBoxLayout()
-        title_col.setSpacing(1)
+        # ── Linha 1: Título + versão ──────────────────────────────────────
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
 
         title_lbl = QLabel("⚙  QGIS Package Manager")
         title_lbl.setObjectName("title")
         version_lbl = QLabel("v1.0.1")
         version_lbl.setObjectName("version")
 
-        title_col.addWidget(title_lbl)
-        title_col.addWidget(version_lbl)
-        h_lay.addLayout(title_col)
-        h_lay.addStretch()
+        title_row.addWidget(title_lbl)
+        title_row.addWidget(version_lbl)
+        title_row.addStretch()
+        h_lay.addLayout(title_row)
 
-        # ── Seletor Python + botões (coluna direita) ──────────────────────
+        # ── Linha 2: Python label + seletor + procurar + info clicável ───
         py_row = QHBoxLayout()
         py_row.setSpacing(6)
 
@@ -711,152 +711,161 @@ class QGISPkgManager(QWidget):
 
     # ── Estilo QSS ────────────────────────────────────────────────────────────
     def _apply_style(self):
+        # ── Paleta ──────────────────────────────────────────────────────────
+        # BG_DEEP   #202024  — fundo principal
+        # BG_WARM   #242320  — superfícies elevadas (modeBar, header)
+        # BG_ALT    #242220  — inputs, campos, scroll container
+        # ACCENT    #021BA3  — azul royal — botão primário, indicadores
+        # GOLD      #A38F00  — âmbar/dourado — versão, foco, hover accent
+        # TEXT_HI   #E8E6E0  — texto principal (quente, não branco puro)
+        # TEXT_MID  #9A978F  — labels secundários
+        # TEXT_DIM  #5C5A55  — hints, placeholders
+        # BORDER    #36332E  — bordas suaves
+        # DANGER    #D94040  — só fonte do desinstalar
         self.setStyleSheet("""
             /* ═══════════════════════════════════════════════════════════════
-               QGIS PKG MANAGER — PALETA ZINC / INDIGO / EMERALD
-               Background profundo  · Acentos índigo vivos · Verde p/ sucesso
+               QGIS PKG MANAGER — PALETA #202024 · #242320 · #021BA3 · #A38F00
                ═══════════════════════════════════════════════════════════════ */
 
             /* ── Base ── */
             QWidget {
-                background: #18181b;
-                color: #e4e4e7;
-                font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter', 'Roboto', sans-serif;
+                background: #202024;
+                color: #E8E6E0;
+                font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter', sans-serif;
                 font-size: 12px;
             }
 
             /* ── Cabeçalho ── */
             QFrame#header {
-                background: #09090b;
-                border-bottom: 1px solid #27272a;
-                padding: 0;
+                background: #18171A;
+                border-bottom: 1px solid #36332E;
             }
             QLabel#title {
                 font-size: 15px;
                 font-weight: 700;
-                color: #fafafa;
-                letter-spacing: 0.3px;
+                color: #E8E6E0;
+                letter-spacing: 0.2px;
             }
             QLabel#version {
                 font-size: 10px;
-                font-weight: 500;
-                color: #6366f1;
-                letter-spacing: 1px;
-                text-transform: uppercase;
+                font-weight: 600;
+                color: #A38F00;
+                letter-spacing: 1.5px;
+                padding-left: 2px;
             }
 
             /* ── Label "Python:" ── */
             QLabel#pyLbl {
-                color: #a1a1aa;
+                color: #9A978F;
                 font-size: 12px;
             }
 
             /* ── Info clicável do python ── */
             QLabel#pyinfo {
                 font-size: 11px;
-                color: #71717a;
-                padding: 4px 8px;
+                color: #5C5A55;
+                padding: 3px 8px;
                 border-radius: 4px;
                 border: 1px solid transparent;
             }
             QLabel#pyinfo:hover {
-                color: #818cf8;
-                background: #1e1e2e;
-                border: 1px solid #3730a3;
+                color: #A38F00;
+                background: #2C2A26;
+                border: 1px solid #A38F00;
             }
 
             /* ── Seletor de Python ── */
             QComboBox#pySelector {
-                background: #27272a;
-                border: 1px solid #3f3f46;
-                border-radius: 5px;
-                padding: 5px 10px;
-                color: #e4e4e7;
+                background: #242220;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                padding: 4px 10px;
+                color: #E8E6E0;
                 font-size: 12px;
-                min-width: 260px;
-                max-height: 28px;
+                min-width: 240px;
+                max-height: 26px;
             }
             QComboBox#pySelector:hover {
-                border-color: #6366f1;
-                background: #2a2a2e;
+                border-color: #021BA3;
+                background: #2A2825;
             }
             QComboBox#pySelector:focus {
-                border-color: #6366f1;
+                border-color: #021BA3;
             }
             QComboBox#pySelector::drop-down {
                 border: none;
-                width: 20px;
+                width: 18px;
             }
             QComboBox#pySelector::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
-                border-top: 5px solid #71717a;
+                border-top: 5px solid #9A978F;
                 margin-right: 6px;
             }
             QComboBox#pySelector QAbstractItemView {
-                background: #1c1c1f;
-                border: 1px solid #3f3f46;
-                border-radius: 5px;
-                selection-background-color: #4f46e5;
-                selection-color: #fff;
-                color: #e4e4e7;
+                background: #242320;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                selection-background-color: #021BA3;
+                selection-color: #E8E6E0;
+                color: #E8E6E0;
                 font-size: 12px;
-                padding: 3px;
+                padding: 2px;
                 outline: none;
             }
 
             /* ── Barra de modo ── */
             QFrame#modeBar {
-                background: #09090b;
-                border-bottom: 1px solid #27272a;
+                background: #1C1B1F;
+                border-bottom: 1px solid #36332E;
             }
             QRadioButton#rb {
                 font-size: 12px;
                 spacing: 7px;
-                color: #a1a1aa;
+                color: #9A978F;
             }
             QRadioButton#rb::indicator {
-                width: 14px; height: 14px;
+                width: 13px; height: 13px;
                 border-radius: 7px;
-                border: 2px solid #3f3f46;
-                background: #18181b;
+                border: 2px solid #36332E;
+                background: #202024;
             }
             QRadioButton#rb::indicator:hover {
-                border-color: #6366f1;
+                border-color: #021BA3;
             }
             QRadioButton#rb::indicator:checked {
-                border-color: #6366f1;
-                background: #6366f1;
+                border-color: #021BA3;
+                background: #021BA3;
             }
             QRadioButton#rb:checked {
-                color: #e4e4e7;
+                color: #E8E6E0;
                 font-weight: 600;
             }
 
             /* ── Inputs ── */
             QTextEdit#inputBox, QLineEdit#searchBox {
-                background: #27272a;
-                border: 1px solid #3f3f46;
-                border-radius: 5px;
-                padding: 8px 10px;
-                color: #e4e4e7;
+                background: #242220;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                padding: 7px 10px;
+                color: #E8E6E0;
                 font-size: 12px;
             }
             QTextEdit#inputBox:focus, QLineEdit#searchBox:focus {
-                border: 1px solid #6366f1;
+                border: 1px solid #021BA3;
             }
 
             /* ── Log ── */
             QFrame#logFrame {
-                background: #09090b;
-                border-top: 1px solid #27272a;
+                background: #18171A;
+                border-top: 1px solid #36332E;
             }
             QTextEdit#logBox {
-                background: #000000;
-                border: 1px solid #27272a;
-                border-radius: 4px;
-                color: #71717a;
+                background: #0E0D10;
+                border: 1px solid #2A2825;
+                border-radius: 3px;
+                color: #9A978F;
                 font-family: 'Cascadia Code', 'Consolas', 'JetBrains Mono', monospace;
                 font-size: 11px;
                 padding: 6px 8px;
@@ -865,175 +874,178 @@ class QGISPkgManager(QWidget):
             /* ── Progress bar ── */
             QProgressBar#pbar {
                 border: none;
-                background: #27272a;
+                background: #36332E;
                 border-radius: 1px;
             }
             QProgressBar#pbar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #4f46e5, stop:1 #818cf8);
+                    stop:0 #021BA3, stop:1 #1A3FD4);
                 border-radius: 1px;
             }
 
             /* ── Botão Primário (Instalar) ── */
             QPushButton#btnPrimary {
-                background: #4f46e5;
-                color: #fff;
+                background: #021BA3;
+                color: #E8E6E0;
                 font-size: 13px;
                 font-weight: 600;
                 border: none;
-                border-radius: 5px;
-                padding: 8px 20px;
+                border-radius: 4px;
+                padding: 7px 20px;
             }
             QPushButton#btnPrimary:hover {
-                background: #6366f1;
+                background: #1A3FD4;
             }
             QPushButton#btnPrimary:pressed {
-                background: #3730a3;
+                background: #011278;
             }
             QPushButton#btnPrimary:disabled {
-                background: #3f3f46;
-                color: #52525b;
+                background: #36332E;
+                color: #5C5A55;
             }
 
-            /* ── Botão Destrutivo (Desinstalar) — fonte vermelha, negrito, sem fundo colorido ── */
+            /* ── Botão Destrutivo — fundo neutro, SOMENTE fonte vermelha ── */
             QPushButton#btnDanger {
-                background: #27272a;
-                color: #f87171;
+                background: #242220;
+                color: #D94040;
                 font-size: 13px;
                 font-weight: 700;
-                border: 1px solid #7f1d1d;
-                border-radius: 5px;
-                padding: 8px 20px;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                padding: 7px 20px;
             }
             QPushButton#btnDanger:hover {
-                background: #3f1515;
-                border-color: #ef4444;
-                color: #fca5a5;
+                background: #2E2220;
+                border-color: #D94040;
+                color: #F06060;
             }
             QPushButton#btnDanger:pressed {
-                background: #500b0b;
+                background: #1E1615;
             }
             QPushButton#btnDanger:disabled {
-                background: #3f3f46;
-                color: #52525b;
-                border-color: #3f3f46;
+                background: #36332E;
+                color: #5C5A55;
+                border-color: #36332E;
             }
 
             /* ── Botão Secundário ── */
             QPushButton#btnSecondary {
                 background: transparent;
-                color: #a1a1aa;
-                border: 1px solid #3f3f46;
-                border-radius: 5px;
-                padding: 5px 12px;
+                color: #9A978F;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                padding: 4px 12px;
                 font-weight: 500;
                 font-size: 12px;
-                max-height: 28px;
+                max-height: 26px;
             }
             QPushButton#btnSecondary:hover {
-                background: #27272a;
-                border-color: #6366f1;
-                color: #e4e4e7;
+                background: #2A2825;
+                border-color: #A38F00;
+                color: #E8E6E0;
             }
             QPushButton#btnSecondary:pressed {
-                background: #1c1c1f;
+                background: #1C1B1F;
+            }
+            QPushButton#btnSecondary:disabled {
+                color: #5C5A55;
             }
 
             /* ── Botão Pequeno ── */
             QPushButton#btnTiny {
                 background: transparent;
-                color: #71717a;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                padding: 4px 10px;
+                color: #5C5A55;
+                border: 1px solid #36332E;
+                border-radius: 3px;
+                padding: 3px 10px;
                 font-size: 11px;
                 font-weight: 500;
             }
             QPushButton#btnTiny:hover {
-                background: #27272a;
-                color: #e4e4e7;
-                border-color: #52525b;
+                background: #2A2825;
+                color: #E8E6E0;
+                border-color: #5C5A55;
             }
 
             /* ── Checkboxes de pacotes ── */
             QCheckBox#pkgCheck {
                 spacing: 8px;
-                color: #a1a1aa;
+                color: #9A978F;
                 padding: 4px 6px;
                 border-radius: 3px;
             }
             QCheckBox#pkgCheck:hover {
-                background: #27272a;
-                color: #e4e4e7;
+                background: #2A2825;
+                color: #E8E6E0;
             }
             QCheckBox#pkgCheck::indicator {
-                width: 14px; height: 14px;
-                border-radius: 3px;
-                border: 1px solid #3f3f46;
-                background: #18181b;
+                width: 13px; height: 13px;
+                border-radius: 2px;
+                border: 1px solid #36332E;
+                background: #202024;
             }
             QCheckBox#pkgCheck::indicator:hover {
-                border-color: #6366f1;
+                border-color: #021BA3;
             }
             QCheckBox#pkgCheck::indicator:checked {
-                background: #4f46e5;
-                border-color: #4f46e5;
+                background: #021BA3;
+                border-color: #021BA3;
             }
 
             /* ── Checkboxes de opções ── */
             QCheckBox#optCheck {
                 spacing: 7px;
-                color: #71717a;
+                color: #5C5A55;
                 font-size: 12px;
             }
             QCheckBox#optCheck::indicator {
-                width: 13px; height: 13px;
-                border-radius: 3px;
-                border: 1px solid #3f3f46;
-                background: #27272a;
+                width: 12px; height: 12px;
+                border-radius: 2px;
+                border: 1px solid #36332E;
+                background: #242220;
             }
             QCheckBox#optCheck::indicator:hover {
-                border-color: #6366f1;
+                border-color: #021BA3;
             }
             QCheckBox#optCheck::indicator:checked {
-                background: #4f46e5;
-                border-color: #4f46e5;
+                background: #021BA3;
+                border-color: #021BA3;
             }
 
             /* ── Badge contador ── */
             QLabel#badge {
-                background: #27272a;
-                color: #a1a1aa;
+                background: #2A2825;
+                color: #9A978F;
                 border-radius: 10px;
-                padding: 3px 10px;
+                padding: 2px 10px;
                 font-size: 11px;
                 font-weight: 600;
             }
 
             /* ── Hints ── */
             QLabel#hint {
-                color: #52525b;
+                color: #5C5A55;
                 font-size: 11px;
             }
 
             /* ── Scroll ── */
             QScrollArea#pkgScroll {
-                border: 1px solid #27272a;
-                border-radius: 5px;
-                background: #18181b;
+                border: 1px solid #36332E;
+                border-radius: 4px;
+                background: #202024;
             }
             QScrollBar:vertical {
-                background: #18181b;
-                width: 7px;
+                background: #202024;
+                width: 6px;
                 border-radius: 3px;
             }
             QScrollBar::handle:vertical {
-                background: #3f3f46;
+                background: #36332E;
                 border-radius: 3px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #52525b;
+                background: #5C5A55;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
@@ -1041,11 +1053,11 @@ class QGISPkgManager(QWidget):
 
             /* ── Tooltips ── */
             QToolTip {
-                background: #1c1c1f;
-                color: #d4d4d8;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                padding: 6px 8px;
+                background: #242320;
+                color: #E8E6E0;
+                border: 1px solid #A38F00;
+                border-radius: 3px;
+                padding: 5px 8px;
                 font-size: 11px;
             }
         """)
