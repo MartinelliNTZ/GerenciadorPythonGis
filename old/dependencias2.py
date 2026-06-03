@@ -22,7 +22,7 @@ from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QTextCursor, QDesktopS
 from PySide6.QtCore import QUrl
 
 # ── Importa o detector do dep2.py ─────────────────────────────────────────────
-from QGISPythonDetector import QGISPythonDetector
+from old.QGISPythonDetector import QGISPythonDetector
 
 # ── Detecta todos os Pythons disponíveis (standalone + QGIS embutidos) ────────
 _PYTHON_OPTIONS: list[tuple[str, str]] = []  # (rótulo, executável)

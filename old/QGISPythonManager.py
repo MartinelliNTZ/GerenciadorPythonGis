@@ -23,7 +23,7 @@ from PySide6.QtGui import QFont, QColor, QTextCursor, QDesktopServices
 from PySide6.QtCore import QUrl
 
 # ── Importa o detector do dep2.py ─────────────────────────────────────────────
-from QGISPythonDetector import QGISPythonDetector
+from old.QGISPythonDetector import QGISPythonDetector
 
 # ── Pasta temp para salvar Pythons personalizados ─────────────────────────────
 _CUSTOM_PYTHONS_DIR = pathlib.Path(tempfile.gettempdir()) / "qgis_pkg_manager"
