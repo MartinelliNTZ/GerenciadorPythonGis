@@ -110,8 +110,10 @@ pip install PySide6
 ### 3. Execute
 
 ```bash
-python qgis_pkg_manager.py
+python QGISPythonManager_SingleFile.py
 ```
+
+> No Windows, você também pode executar o arquivo por **duplo clique** se a extensão `.py` estiver associada ao Python.
 
 #### Alternativa: Rodar direto dentro do QGIS
 
@@ -371,6 +373,6 @@ Distribuído sob a licença **MIT**. Veja o arquivo [LICENSE](LICENSE) para mais
 
 <div align="center">
 
-Feito com ♥ para a comunidade QGIS
+Feito para a comunidade QGIS
 
 </div>
