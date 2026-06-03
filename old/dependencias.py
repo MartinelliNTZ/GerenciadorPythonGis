@@ -1,71 +1,36 @@
 """
-QGIS Package Manager v1.0.1 — Gerenciador de pacotes Python para o QGIS
+QGIS Package Manager — Gerenciador de pacotes Python para o QGIS
 Requer: PySide6  →  pip install PySide6
 Uso: rode com o Python interno do QGIS ou qualquer Python com PySide6 instalado.
 """
 
 import sys
 import subprocess
-import json
-import pathlib
-import datetime
-import tempfile
+import importlib.metadata
 import re as _re
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QRadioButton, QButtonGroup, QPushButton, QTextEdit,
     QLabel, QScrollArea, QCheckBox, QFrame, QLineEdit,
-    QProgressBar, QMessageBox, QStackedWidget,
+    QSplitter, QProgressBar, QMessageBox, QStackedWidget,
     QSizePolicy, QComboBox, QFileDialog
 )
-from PySide6.QtCore import Qt, QThread, Signal, QDir
-from PySide6.QtGui import QFont, QColor, QTextCursor, QDesktopServices
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QTextCursor, QDesktopServices
 from PySide6.QtCore import QUrl
 
 # ── Importa o detector do dep2.py ─────────────────────────────────────────────
-from dep2 import QGISPythonDetector
-
-# ── Pasta temp para salvar Pythons personalizados ─────────────────────────────
-_CUSTOM_PYTHONS_DIR = pathlib.Path(tempfile.gettempdir()) / "qgis_pkg_manager"
-_CUSTOM_PYTHONS_DIR.mkdir(exist_ok=True)
-_CUSTOM_PYTHONS_FILE = _CUSTOM_PYTHONS_DIR / "custom_pythons.json"
-
-
-def _load_custom_pythons() -> list[dict]:
-    """Carrega Pythons personalizados salvos em temp."""
-    if _CUSTOM_PYTHONS_FILE.exists():
-        try:
-            with open(_CUSTOM_PYTHONS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
-
-
-def _save_custom_python(exe: str, version: str):
-    """Salva um novo Python personalizado no arquivo JSON de temp."""
-    data = _load_custom_pythons()
-    # Não duplica
-    for entry in data:
-        if entry.get("exe") == exe:
-            return
-    data.append({
-        "exe": exe,
-        "version": version,
-        "label": f"Python {version} (personalizado)",
-        "added": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
-    with open(_CUSTOM_PYTHONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
+from QGISPythonDetector import QGISPythonDetector
 
 # ── Detecta todos os Pythons disponíveis (standalone + QGIS embutidos) ────────
+_PYTHON_OPTIONS: list[tuple[str, str]] = []  # (rótulo, executável)
 def _load_python_options() -> list[tuple[str, str]]:
     """Retorna lista de (label, executable) para todos os Pythons detectados."""
     detector = QGISPythonDetector()
     result = detector.detect()
     options: list[tuple[str, str]] = []
 
+    # Pythons standalone
     for py in result.system_pythons:
         label = py.name
         if py.source == "current_process":
@@ -74,27 +39,26 @@ def _load_python_options() -> list[tuple[str, str]]:
             label += " (conda)"
         options.append((label, py.executable))
 
+    # Pythons embutidos no QGIS
     for qgis in result.qgis_installations:
         if qgis.python and qgis.python.executable:
             label = f"{qgis.python.name} [embutido: {qgis.name}]"
             options.append((label, qgis.python.executable))
 
-    # Adiciona os personalizados salvos em temp
-    for entry in _load_custom_pythons():
-        options.append((entry["label"], entry["exe"]))
-
     return options
 
-
+# Carrega cache de opções (executado apenas uma vez na importação)
 _ALL_PYTHON_OPTIONS = _load_python_options()
 
+# ── Python atualmente selecionado ─────────────────────────────────────────────
+_CURRENT_PYTHON_EXE: str = sys.executable  # fallback: o que está rodando
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Worker thread – roda pip sem travar a UI
 # ─────────────────────────────────────────────────────────────────────────────
 class PipWorker(QThread):
-    log_line = Signal(str)
-    finished = Signal(bool)
+    log_line  = Signal(str)   # linha de output
+    finished  = Signal(bool)  # True = sucesso
 
     def __init__(self, cmd: list[str]):
         super().__init__()
@@ -123,8 +87,8 @@ class PipWorker(QThread):
 # Worker thread – lista pacotes instalados de um Python específico
 # ─────────────────────────────────────────────────────────────────────────────
 class ListPackagesWorker(QThread):
-    packages_loaded = Signal(list)
-    log_line = Signal(str)
+    packages_loaded = Signal(list)  # list[tuple[nome, versão]]
+    log_line        = Signal(str)
 
     def __init__(self, python_exe: str):
         super().__init__()
@@ -132,13 +96,13 @@ class ListPackagesWorker(QThread):
 
     def run(self):
         try:
-            code = (
-                "import importlib.metadata, json; "
-                "pkgs = sorted(importlib.metadata.distributions(), "
-                "key=lambda d: d.metadata.get('Name','').lower()); "
-                "print(json.dumps([(d.metadata.get('Name','?'), "
-                "d.metadata.get('Version','?')) for d in pkgs]))"
-            )
+            # Usa importlib.metadata via subprocess para pegar os pacotes do Python alvo
+            code = """
+import importlib.metadata, json
+pkgs = sorted(importlib.metadata.distributions(), key=lambda d: d.metadata.get('Name', '').lower())
+out = [(d.metadata.get('Name', '?'), d.metadata.get('Version', '?')) for d in pkgs]
+print(json.dumps(out))
+"""
             proc = subprocess.Popen(
                 [self.python_exe, "-c", code],
                 stdout=subprocess.PIPE,
@@ -149,6 +113,7 @@ class ListPackagesWorker(QThread):
             )
             stdout, _ = proc.communicate(timeout=30)
             if proc.returncode == 0:
+                import json
                 data = json.loads(stdout.strip())
                 self.packages_loaded.emit(data)
             else:
@@ -166,7 +131,7 @@ class QGISPkgManager(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("QGIS · Gerenciador de Pacotes Python")
-        self.setMinimumSize(880, 620)
+        self.setMinimumSize(920, 680)
         self._worker = None
         self._list_worker = None
         self._current_python_exe: str = sys.executable
@@ -181,11 +146,12 @@ class QGISPkgManager(QWidget):
     @python_exe.setter
     def python_exe(self, value: str):
         self._current_python_exe = value
+        # Atualiza o label de info com caminho clicável
         version_str = self._get_python_version(value) or "?"
-        self.py_info_label.setText(f"Python {version_str}  📁")
-        self.py_info_label.setToolTip(
-            f"Clique para abrir a pasta do executável no explorer\n{value}"
+        self.py_info_label.setText(
+            f"Python {version_str}  ·  📎 {value}"
         )
+        self.py_info_label.setToolTip(f"Clique para abrir o local\n{value}")
 
     @staticmethod
     def _get_python_version(exe: str) -> str | None:
@@ -201,128 +167,79 @@ class QGISPkgManager(QWidget):
             pass
         return None
 
-    @staticmethod
-    def _find_python_in_folder(folder: str) -> str | None:
-        """Procura por executável Python dentro de uma pasta (suporte a QGIS)."""
-        candidates = [
-            "python.exe", "python3.exe",           # Windows
-            "python", "python3",                    # Linux/macOS
-            "bin/python.exe", "bin/python3.exe",
-            "bin/python", "bin/python3",
-            # Caminhos típicos do QGIS Windows
-            "apps/Python312/python.exe",
-            "apps/Python311/python.exe",
-            "apps/Python310/python.exe",
-            "apps/Python39/python.exe",
-        ]
-        root = pathlib.Path(folder)
-        for c in candidates:
-            p = root / c
-            if p.exists():
-                return str(p)
-        # Busca recursiva limitada (profundidade 4) para qualquer python.exe / python3
-        for depth in range(1, 5):
-            pattern = "/".join(["*"] * depth)
-            for name in ("python.exe", "python3.exe", "python", "python3"):
-                for found in root.glob(f"{pattern}/{name}"):
-                    if found.is_file():
-                        return str(found)
-        return None
-
     # ── UI ───────────────────────────────────────────────────────────────────
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setSpacing(0)
         root.setContentsMargins(0, 0, 0, 0)
 
-        # ══ CABEÇALHO: duas linhas ════════════════════════════════════════════
+        # ── Cabeçalho ─────────────────────────────────────────────────────
         header = QFrame()
         header.setObjectName("header")
-        h_lay = QVBoxLayout(header)
-        h_lay.setContentsMargins(20, 8, 20, 8)
-        h_lay.setSpacing(4)
+        header.setFixedHeight(72)
+        h_lay = QHBoxLayout(header)
+        h_lay.setContentsMargins(24, 0, 24, 0)
 
-        # ── Linha 1: Título + versão ──────────────────────────────────────
-        title_row = QHBoxLayout()
-        title_row.setSpacing(8)
+        title = QLabel("⚙  QGIS Package Manager")
+        title.setObjectName("title")
+        h_lay.addWidget(title)
+        h_lay.addStretch()
 
-        title_lbl = QLabel("⚙  QGIS Package Manager")
-        title_lbl.setObjectName("title")
-        version_lbl = QLabel("v1.0.1")
-        version_lbl.setObjectName("version")
+        # ── Seletor de Python ─────────────────────────────────────────────
+        selector_frame = QFrame()
+        selector_frame.setObjectName("selectorFrame")
+        sel_lay = QHBoxLayout(selector_frame)
+        sel_lay.setContentsMargins(0, 0, 0, 0)
+        sel_lay.setSpacing(8)
 
-        title_row.addWidget(title_lbl)
-        title_row.addWidget(version_lbl)
-        title_row.addStretch()
-        h_lay.addLayout(title_row)
-
-        # ── Linha 2: Python label + seletor + procurar + info clicável ───
-        py_row = QHBoxLayout()
-        py_row.setSpacing(6)
-
-        py_lbl = QLabel("Python:")
-        py_lbl.setObjectName("pyLbl")
-        py_lbl.setToolTip(
-            "Selecione qual interpretador Python usar para instalar/remover pacotes.\n"
-            "Você pode escolher um Python do sistema, embutido no QGIS,\n"
-            "ou localizar manualmente com o botão 📂 Procurar."
-        )
-        py_row.addWidget(py_lbl)
+        sel_lay.addWidget(QLabel("Python:"))
 
         self.py_selector = QComboBox()
         self.py_selector.setObjectName("pySelector")
+        self.py_selector.setMinimumWidth(320)
         self.py_selector.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.py_selector.setToolTip(
-            "Lista de interpretadores Python detectados no sistema.\n"
-            "Inclui Pythons standalone, ambientes conda e Pythons\n"
-            "embutidos nas instalações do QGIS encontradas.\n\n"
-            "Para adicionar um Python não listado, use o botão 📂 Procurar."
-        )
 
+        # Preenche o combo com as opções detectadas
         current_exe_lower = sys.executable.lower().replace("\\", "/")
         selected_index = 0
         for i, (label, exe) in enumerate(_ALL_PYTHON_OPTIONS):
             self.py_selector.addItem(label, exe)
+            # Marca o Python atual como selecionado por padrão
             if exe.lower().replace("\\", "/") == current_exe_lower:
                 selected_index = i
 
         self.py_selector.setCurrentIndex(selected_index)
         self.py_selector.currentIndexChanged.connect(self._on_python_changed)
-        py_row.addWidget(self.py_selector, stretch=1)
+        sel_lay.addWidget(self.py_selector, stretch=1)
 
+        # ── Botão "Procurar..." ─────────────────────────────────────────
         self.btn_browse = QPushButton("📂  Procurar…")
         self.btn_browse.setObjectName("btnSecondary")
-        self.btn_browse.setToolTip(
-            "Localizar manualmente um executável Python ou pasta do QGIS.\n\n"
-            "• Selecione python.exe / python diretamente, OU\n"
-            "• Selecione a pasta raiz do QGIS — o executável\n"
-            "  Python embutido será localizado automaticamente.\n\n"
-            "O Python encontrado será salvo em temp para uso futuro."
-        )
         self.btn_browse.clicked.connect(self._on_browse_python)
-        py_row.addWidget(self.btn_browse)
+        sel_lay.addWidget(self.btn_browse)
 
+        h_lay.addWidget(selector_frame)
+
+        # ── Info do Python selecionado (caminho clicável) ─────────────────
         self.py_info_label = QLabel()
         self.py_info_label.setObjectName("pyinfo")
         self.py_info_label.setCursor(Qt.PointingHandCursor)
         self.py_info_label.mousePressEvent = lambda e: self._open_python_path()
-        py_row.addWidget(self.py_info_label)
+        h_lay.addWidget(self.py_info_label)
 
-        h_lay.addLayout(py_row)
+        # Inicializa com o Python atual
         self.python_exe = self.py_selector.currentData() or sys.executable
 
         root.addWidget(header)
 
-        # ══ BARRA DE MODO ════════════════════════════════════════════════════
+        # ── Seletor de modo ───────────────────────────────────────────────
         mode_frame = QFrame()
         mode_frame.setObjectName("modeBar")
         mode_lay = QHBoxLayout(mode_frame)
-        mode_lay.setContentsMargins(20, 8, 20, 8)
-        mode_lay.setSpacing(24)
+        mode_lay.setContentsMargins(24, 12, 24, 12)
+        mode_lay.setSpacing(32)
 
-        mode_lay.addWidget(QLabel("Modo:"))
-
-        self.rb_install = QRadioButton("  Instalar")
+        self.rb_install   = QRadioButton("  Instalar")
         self.rb_uninstall = QRadioButton("  Desinstalar")
         self.rb_install.setChecked(True)
         self.rb_install.setObjectName("rb")
@@ -331,32 +248,34 @@ class QGISPkgManager(QWidget):
         group = QButtonGroup(self)
         group.addButton(self.rb_install)
         group.addButton(self.rb_uninstall)
+
         self.rb_install.toggled.connect(self._on_mode_change)
 
+        mode_lay.addWidget(QLabel("Modo:"))
         mode_lay.addWidget(self.rb_install)
         mode_lay.addWidget(self.rb_uninstall)
         mode_lay.addStretch()
 
+        # botão atualizar lista (só visível no modo desinstalar)
         self.btn_refresh = QPushButton("↻  Atualizar lista")
         self.btn_refresh.setObjectName("btnSecondary")
-        self.btn_refresh.setToolTip("Recarrega a lista de pacotes instalados no Python selecionado.")
         self.btn_refresh.clicked.connect(self._load_installed)
         self.btn_refresh.setVisible(False)
         mode_lay.addWidget(self.btn_refresh)
 
         root.addWidget(mode_frame)
 
-        # ══ STACK: INSTALAR / DESINSTALAR ════════════════════════════════════
+        # ── Área central (stack) ──────────────────────────────────────────
         self.stack = QStackedWidget()
-        self.stack.addWidget(self._build_install_panel())
-        self.stack.addWidget(self._build_uninstall_panel())
+        self.stack.addWidget(self._build_install_panel())   # índice 0
+        self.stack.addWidget(self._build_uninstall_panel()) # índice 1
         root.addWidget(self.stack, stretch=1)
 
-        # ══ LOG ══════════════════════════════════════════════════════════════
+        # ── Log ───────────────────────────────────────────────────────────
         log_frame = QFrame()
         log_frame.setObjectName("logFrame")
         log_lay = QVBoxLayout(log_frame)
-        log_lay.setContentsMargins(12, 6, 12, 6)
+        log_lay.setContentsMargins(12, 8, 12, 8)
         log_lay.setSpacing(4)
 
         log_header = QHBoxLayout()
@@ -364,7 +283,6 @@ class QGISPkgManager(QWidget):
         log_header.addStretch()
         self.btn_clear_log = QPushButton("Limpar")
         self.btn_clear_log.setObjectName("btnTiny")
-        self.btn_clear_log.setToolTip("Limpa o conteúdo do log de saída.")
         self.btn_clear_log.clicked.connect(lambda: self.log.clear())
         log_header.addWidget(self.btn_clear_log)
         log_lay.addLayout(log_header)
@@ -372,12 +290,12 @@ class QGISPkgManager(QWidget):
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setObjectName("logBox")
-        self.log.setFixedHeight(136)
+        self.log.setFixedHeight(160)
         log_lay.addWidget(self.log)
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setFixedHeight(3)
+        self.progress.setRange(0, 0)  # indeterminate
+        self.progress.setFixedHeight(4)
         self.progress.setObjectName("pbar")
         self.progress.setVisible(False)
         log_lay.addWidget(self.progress)
@@ -388,11 +306,11 @@ class QGISPkgManager(QWidget):
     def _build_install_panel(self):
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(20, 14, 20, 14)
-        lay.setSpacing(10)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(14)
 
         lbl = QLabel(
-            "Digite os pacotes que deseja instalar. "
+            "Digite os pacotes que deseja instalar.\n"
             "Separe por vírgula, espaço ou nova linha. "
             "Versões aceitas:  numpy>=1.24  opencv-python==4.8.0"
         )
@@ -407,14 +325,12 @@ class QGISPkgManager(QWidget):
         )
         lay.addWidget(self.txt_pkgs, stretch=1)
 
+        # opções extras
         opt_lay = QHBoxLayout()
-        opt_lay.setSpacing(20)
         self.chk_upgrade = QCheckBox("--upgrade  (atualizar se já instalado)")
         self.chk_upgrade.setObjectName("optCheck")
-        self.chk_upgrade.setToolTip("Passa --upgrade ao pip: reinstala mesmo que já esteja na versão mais recente.")
         self.chk_no_deps = QCheckBox("--no-deps  (ignorar dependências)")
         self.chk_no_deps.setObjectName("optCheck")
-        self.chk_no_deps.setToolTip("Passa --no-deps ao pip: instala apenas o pacote, sem instalar suas dependências.")
         opt_lay.addWidget(self.chk_upgrade)
         opt_lay.addWidget(self.chk_no_deps)
         opt_lay.addStretch()
@@ -422,7 +338,6 @@ class QGISPkgManager(QWidget):
 
         self.btn_install = QPushButton("▶  Instalar pacotes")
         self.btn_install.setObjectName("btnPrimary")
-        self.btn_install.setToolTip("Executa pip install com os pacotes listados no Python selecionado.")
         self.btn_install.clicked.connect(self._run_install)
         lay.addWidget(self.btn_install)
 
@@ -432,11 +347,10 @@ class QGISPkgManager(QWidget):
     def _build_uninstall_panel(self):
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(20, 12, 20, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(24, 16, 24, 16)
+        lay.setSpacing(10)
 
         top_lay = QHBoxLayout()
-        top_lay.setSpacing(8)
         hint = QLabel("Marque os pacotes que deseja remover:")
         hint.setObjectName("hint")
         top_lay.addWidget(hint)
@@ -446,44 +360,37 @@ class QGISPkgManager(QWidget):
         self.lbl_selected.setObjectName("badge")
         top_lay.addWidget(self.lbl_selected)
 
-        self.btn_sel_all = QPushButton("Selecionar todos")
+        self.btn_sel_all  = QPushButton("Selecionar todos")
         self.btn_sel_all.setObjectName("btnTiny")
-        self.btn_sel_all.setToolTip("Seleciona todos os pacotes visíveis na lista.")
         self.btn_sel_all.clicked.connect(lambda: self._select_all(True))
-
         self.btn_sel_none = QPushButton("Limpar seleção")
         self.btn_sel_none.setObjectName("btnTiny")
-        self.btn_sel_none.setToolTip("Desmarca todos os pacotes selecionados.")
         self.btn_sel_none.clicked.connect(lambda: self._select_all(False))
-
         top_lay.addWidget(self.btn_sel_all)
         top_lay.addWidget(self.btn_sel_none)
         lay.addLayout(top_lay)
 
+        # busca
         self.search = QLineEdit()
         self.search.setObjectName("searchBox")
         self.search.setPlaceholderText("🔍  Filtrar pacotes…")
-        self.search.setToolTip("Digite parte do nome do pacote para filtrar a lista abaixo.")
         self.search.textChanged.connect(self._filter_packages)
         lay.addWidget(self.search)
 
+        # lista com scroll
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setObjectName("pkgScroll")
         self.pkg_container = QWidget()
-        self.pkg_layout = QVBoxLayout(self.pkg_container)
-        self.pkg_layout.setSpacing(4)
-        self.pkg_layout.setContentsMargins(6, 6, 6, 6)
+        self.pkg_layout    = QVBoxLayout(self.pkg_container)
+        self.pkg_layout.setSpacing(2)
+        self.pkg_layout.setContentsMargins(8, 8, 8, 8)
         self.pkg_layout.addStretch()
         scroll.setWidget(self.pkg_container)
         lay.addWidget(scroll, stretch=1)
 
         self.btn_uninstall = QPushButton("🗑  Desinstalar selecionados")
         self.btn_uninstall.setObjectName("btnDanger")
-        self.btn_uninstall.setToolTip(
-            "Remove permanentemente os pacotes selecionados do Python alvo.\n"
-            "Uma confirmação será solicitada antes de prosseguir."
-        )
         self.btn_uninstall.clicked.connect(self._run_uninstall)
         lay.addWidget(self.btn_uninstall)
 
@@ -501,47 +408,20 @@ class QGISPkgManager(QWidget):
             if not self._checkboxes:
                 self._load_installed()
 
-    # ── Procurar Python / Pasta QGIS ─────────────────────────────────────────
+    # ── Buscar Python em uma pasta ─────────────────────────────────────────
     def _on_browse_python(self):
-        """
-        Permite selecionar:
-          1. Um executável Python diretamente (python.exe / python)
-          2. Uma pasta (e.g. raiz do QGIS) — busca python automaticamente
-        """
-        # Primeiro tenta como arquivo executável
-        if sys.platform == "win32":
-            file_filter = "Python (python.exe python3.exe);;Todos (*)"
-        else:
-            file_filter = "Python (python python3);;Todos (*)"
-
+        """Abre diálogo para selecionar um executável Python (python.exe) de qualquer pasta."""
+        exe_name = "python.exe" if sys.platform == "win32" else "python"
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Selecionar executável Python ou pasta do QGIS",
+            "Selecionar executável Python",
             "",
-            file_filter
+            f"Python ({exe_name});;Todos (*)"
         )
-
         if not file_path:
-            # Tenta seleção de pasta (caso o usuário cancele o diálogo de arquivo)
-            folder = QFileDialog.getExistingDirectory(
-                self,
-                "Ou selecione a pasta raiz do QGIS / Python",
-                ""
-            )
-            if not folder:
-                return
-            # Busca o python na pasta
-            found = self._find_python_in_folder(folder)
-            if not found:
-                QMessageBox.warning(
-                    self, "Python não encontrado",
-                    f"Não foi possível encontrar um executável Python na pasta:\n{folder}\n\n"
-                    "Tente apontar diretamente para o python.exe."
-                )
-                return
-            file_path = found
+            return
 
-        # Valida o executável encontrado
+        # Verifica se é um Python válido
         version = self._get_python_version(file_path)
         if not version:
             QMessageBox.warning(
@@ -550,31 +430,25 @@ class QGISPkgManager(QWidget):
             )
             return
 
-        # Verifica se já está no combo
+        # Adiciona ao combo (se já não existe) e seleciona
         for i in range(self.py_selector.count()):
             if self.py_selector.itemData(i) == file_path:
                 self.py_selector.setCurrentIndex(i)
-                self._log(f"[INFO] Python já listado, selecionado: {file_path}", "#a78bfa")
                 return
-
-        # Salva em temp (JSON com nome + versão + data)
-        _save_custom_python(file_path, version)
-        self._log(
-            f"[INFO] Python personalizado salvo em: {_CUSTOM_PYTHONS_FILE}",
-            "#a78bfa"
-        )
 
         label = f"Python {version} (personalizado)"
         self.py_selector.addItem(label, file_path)
         self.py_selector.setCurrentIndex(self.py_selector.count() - 1)
-        self._log(f"[INFO] Python adicionado: {file_path} ({version})", "#34d399")
+        self._log(f"[INFO] Python personalizado adicionado: {file_path}", "#6ee7b7")
 
-    # ── Abrir local do Python no explorer ─────────────────────────────────────
+    # ── Abrir local do Python no explorador ────────────────────────────────
     def _open_python_path(self):
+        """Abre a pasta do executável Python no explorador de arquivos."""
+        import pathlib
         p = pathlib.Path(self.python_exe)
         folder = str(p.parent)
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
-        self._log(f"[INFO] Abrindo pasta: {folder}", "#60a5fa")
+        self._log(f"[INFO] Abrindo pasta: {folder}", "#93c5fd")
 
     # ── Troca de Python selecionado ───────────────────────────────────────────
     def _on_python_changed(self, index: int):
@@ -582,17 +456,22 @@ class QGISPkgManager(QWidget):
         if not exe:
             return
         self.python_exe = exe
-        self._log(f"[INFO] Python alterado para: {exe}", "#60a5fa")
+        self._log(
+            f"[INFO] Python alterado para: {exe}",
+            "#93c5fd"
+        )
+        # Recarrega a lista de pacotes se estiver no modo desinstalar
         if hasattr(self, '_checkboxes') and self.rb_uninstall.isChecked():
             self._load_installed()
 
-    # ── Carrega pacotes instalados ────────────────────────────────────────────
+    # ── Carrega pacotes instalados (agora via subprocess para o Python alvo) ──
     def _load_installed(self):
+        # limpa lista anterior
         for cb in self._checkboxes:
             cb.setParent(None)
         self._checkboxes.clear()
 
-        self._log(f"[INFO] Carregando pacotes de: {self.python_exe}", "#60a5fa")
+        self._log(f"[INFO] Carregando pacotes de: {self.python_exe}", "#93c5fd")
         self._set_busy(True)
 
         self._list_worker = ListPackagesWorker(self.python_exe)
@@ -603,6 +482,8 @@ class QGISPkgManager(QWidget):
     def _on_packages_loaded(self, packages: list):
         self._set_busy(False)
 
+        # Remove o stretch antigo e os checkboxes
+        # O layout já foi limpo em _load_installed, mas vamos garantir
         while self.pkg_layout.count() > 0:
             item = self.pkg_layout.takeAt(0)
             if item.widget():
@@ -616,11 +497,9 @@ class QGISPkgManager(QWidget):
             self._checkboxes.append(cb)
         self.pkg_layout.addStretch()
         self._update_selected_count()
-        self._log(
-            f"[INFO] {len(self._checkboxes)} pacotes encontrados em {self.python_exe}.",
-            "#34d399"
-        )
+        self._log(f"[INFO] {len(self._checkboxes)} pacotes encontrados em {self.python_exe}.", "#6ee7b7")
 
+        # Reaplica o filtro se houver texto na busca
         if hasattr(self, 'search') and self.search.text():
             self._filter_packages(self.search.text())
 
@@ -640,9 +519,10 @@ class QGISPkgManager(QWidget):
     # ── Instalar ──────────────────────────────────────────────────────────────
     def _run_install(self):
         raw = self.txt_pkgs.toPlainText()
+        # separa por vírgula, espaço ou nova linha
         pkgs = [p.strip() for p in _re.split(r"[\s,]+", raw) if p.strip()]
         if not pkgs:
-            self._log("[AVISO] Nenhum pacote informado.", "#f59e0b")
+            self._log("[AVISO] Nenhum pacote informado.", "#fbbf24")
             return
 
         cmd = [self.python_exe, "-m", "pip", "install"] + pkgs
@@ -651,10 +531,11 @@ class QGISPkgManager(QWidget):
         if self.chk_no_deps.isChecked():
             cmd.append("--no-deps")
 
-        self._log(f"[CMD] {' '.join(cmd)}", "#818cf8")
+        self._log(f"[CMD] {' '.join(cmd)}", "#93c5fd")
         self._run_cmd(cmd, post_action=self._on_install_done)
 
     def _on_install_done(self):
+        """Após instalar, se estiver no modo desinstalar, recarrega a lista."""
         if self.rb_uninstall.isChecked():
             self._load_installed()
 
@@ -665,7 +546,7 @@ class QGISPkgManager(QWidget):
             for cb in self._checkboxes if cb.isChecked()
         ]
         if not selected:
-            self._log("[AVISO] Nenhum pacote selecionado.", "#f59e0b")
+            self._log("[AVISO] Nenhum pacote selecionado.", "#fbbf24")
             return
 
         confirm = QMessageBox.question(
@@ -677,7 +558,7 @@ class QGISPkgManager(QWidget):
             return
 
         cmd = [self.python_exe, "-m", "pip", "uninstall", "-y"] + selected
-        self._log(f"[CMD] {' '.join(cmd)}", "#818cf8")
+        self._log(f"[CMD] {' '.join(cmd)}", "#93c5fd")
         self._run_cmd(cmd, post_action=self._load_installed)
 
     # ── Executa pip em thread ─────────────────────────────────────────────────
@@ -690,7 +571,7 @@ class QGISPkgManager(QWidget):
 
     def _on_done(self, ok: bool, post_action=None):
         self._set_busy(False)
-        color = "#34d399" if ok else "#f87171"
+        color = "#6ee7b7" if ok else "#f87171"
         self._log("✔  Concluído com sucesso." if ok else "✖  Falhou.", color)
         if ok and post_action:
             post_action()
@@ -704,361 +585,266 @@ class QGISPkgManager(QWidget):
         self.py_selector.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
 
-    def _log(self, text: str, color: str = "#94a3b8"):
+    def _log(self, text: str, color: str = "#e2e8f0"):
         self.log.setTextColor(QColor(color))
         self.log.append(text)
         self.log.moveCursor(QTextCursor.End)
 
-    # ── Estilo QSS ────────────────────────────────────────────────────────────
+    # ── Estilo ────────────────────────────────────────────────────────────────
     def _apply_style(self):
-        # ── Paleta ──────────────────────────────────────────────────────────
-        # BG_DEEP   #202024  — fundo principal
-        # BG_WARM   #242320  — superfícies elevadas (modeBar, header)
-        # BG_ALT    #242220  — inputs, campos, scroll container
-        # ACCENT    #021BA3  — azul royal — botão primário, indicadores
-        # GOLD      #A38F00  — âmbar/dourado — versão, foco, hover accent
-        # TEXT_HI   #E8E6E0  — texto principal (quente, não branco puro)
-        # TEXT_MID  #9A978F  — labels secundários
-        # TEXT_DIM  #5C5A55  — hints, placeholders
-        # BORDER    #36332E  — bordas suaves
-        # DANGER    #D94040  — só fonte do desinstalar
         self.setStyleSheet("""
-            /* ═══════════════════════════════════════════════════════════════
-               QGIS PKG MANAGER — PALETA #202024 · #242320 · #021BA3 · #A38F00
-               ═══════════════════════════════════════════════════════════════ */
-
-            /* ── Base ── */
+            /* ── Geral ── */
             QWidget {
-                background: #202024;
-                color: #E8E6E0;
-                font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter', sans-serif;
-                font-size: 12px;
+                background: #0f172a;
+                color: #e2e8f0;
+                font-family: 'Consolas', 'JetBrains Mono', monospace;
+                font-size: 13px;
             }
 
             /* ── Cabeçalho ── */
             QFrame#header {
-                background: #18171A;
-                border-bottom: 1px solid #36332E;
+                background: #1e293b;
+                border-bottom: 2px solid #334155;
+                min-height: 72px;
             }
             QLabel#title {
-                font-size: 15px;
-                font-weight: 700;
-                color: #E8E6E0;
-                letter-spacing: 0.2px;
+                font-size: 17px;
+                font-weight: bold;
+                color: #38bdf8;
+                letter-spacing: 1px;
             }
-            QLabel#version {
-                font-size: 10px;
-                font-weight: 600;
-                color: #A38F00;
-                letter-spacing: 1.5px;
-                padding-left: 2px;
-            }
-
-            /* ── Label "Python:" ── */
-            QLabel#pyLbl {
-                color: #9A978F;
-                font-size: 12px;
-            }
-
-            /* ── Info clicável do python ── */
             QLabel#pyinfo {
                 font-size: 11px;
-                color: #5C5A55;
-                padding: 3px 8px;
+                color: #64748b;
+                margin-left: 12px;
+                padding: 4px 8px;
                 border-radius: 4px;
                 border: 1px solid transparent;
             }
             QLabel#pyinfo:hover {
-                color: #A38F00;
-                background: #2C2A26;
-                border: 1px solid #A38F00;
+                color: #38bdf8;
+                background: #1e293b;
+                border: 1px solid #334155;
             }
 
             /* ── Seletor de Python ── */
+            QFrame#selectorFrame {
+                background: transparent;
+            }
             QComboBox#pySelector {
-                background: #242220;
-                border: 1px solid #36332E;
-                border-radius: 4px;
-                padding: 4px 10px;
-                color: #E8E6E0;
+                background: #0f172a;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #e2e8f0;
                 font-size: 12px;
-                min-width: 240px;
-                max-height: 26px;
+                min-width: 280px;
+                max-width: 480px;
             }
             QComboBox#pySelector:hover {
-                border-color: #021BA3;
-                background: #2A2825;
-            }
-            QComboBox#pySelector:focus {
-                border-color: #021BA3;
+                border-color: #38bdf8;
             }
             QComboBox#pySelector::drop-down {
                 border: none;
-                width: 18px;
+                width: 24px;
             }
             QComboBox#pySelector::down-arrow {
                 image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #9A978F;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #64748b;
                 margin-right: 6px;
             }
             QComboBox#pySelector QAbstractItemView {
-                background: #242320;
-                border: 1px solid #36332E;
+                background: #1e293b;
+                border: 1px solid #334155;
                 border-radius: 4px;
-                selection-background-color: #021BA3;
-                selection-color: #E8E6E0;
-                color: #E8E6E0;
+                selection-background-color: #0ea5e9;
+                selection-color: #fff;
+                color: #e2e8f0;
                 font-size: 12px;
-                padding: 2px;
+                padding: 4px;
                 outline: none;
             }
 
             /* ── Barra de modo ── */
             QFrame#modeBar {
-                background: #1C1B1F;
-                border-bottom: 1px solid #36332E;
+                background: #1e293b;
+                border-bottom: 1px solid #334155;
             }
             QRadioButton#rb {
-                font-size: 12px;
-                spacing: 7px;
-                color: #9A978F;
+                font-size: 14px;
+                spacing: 8px;
+                color: #cbd5e1;
             }
             QRadioButton#rb::indicator {
-                width: 13px; height: 13px;
-                border-radius: 7px;
-                border: 2px solid #36332E;
-                background: #202024;
-            }
-            QRadioButton#rb::indicator:hover {
-                border-color: #021BA3;
+                width: 18px; height: 18px;
+                border-radius: 9px;
+                border: 2px solid #475569;
+                background: #0f172a;
             }
             QRadioButton#rb::indicator:checked {
-                border-color: #021BA3;
-                background: #021BA3;
+                border-color: #38bdf8;
+                background: #38bdf8;
             }
             QRadioButton#rb:checked {
-                color: #E8E6E0;
-                font-weight: 600;
+                color: #38bdf8;
+                font-weight: bold;
             }
 
             /* ── Inputs ── */
             QTextEdit#inputBox, QLineEdit#searchBox {
-                background: #242220;
-                border: 1px solid #36332E;
-                border-radius: 4px;
-                padding: 7px 10px;
-                color: #E8E6E0;
-                font-size: 12px;
+                background: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 10px;
+                color: #e2e8f0;
+                font-size: 13px;
             }
             QTextEdit#inputBox:focus, QLineEdit#searchBox:focus {
-                border: 1px solid #021BA3;
+                border-color: #38bdf8;
             }
 
             /* ── Log ── */
             QFrame#logFrame {
-                background: #18171A;
-                border-top: 1px solid #36332E;
+                background: #0b1120;
+                border-top: 2px solid #334155;
             }
             QTextEdit#logBox {
-                background: #0E0D10;
-                border: 1px solid #2A2825;
-                border-radius: 3px;
-                color: #9A978F;
-                font-family: 'Cascadia Code', 'Consolas', 'JetBrains Mono', monospace;
-                font-size: 11px;
-                padding: 6px 8px;
+                background: #020817;
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                color: #94a3b8;
+                font-size: 12px;
+                padding: 6px;
             }
 
             /* ── Progress bar ── */
             QProgressBar#pbar {
                 border: none;
-                background: #36332E;
-                border-radius: 1px;
+                background: #1e293b;
+                border-radius: 2px;
             }
             QProgressBar#pbar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #021BA3, stop:1 #1A3FD4);
-                border-radius: 1px;
+                    stop:0 #38bdf8, stop:1 #818cf8);
+                border-radius: 2px;
             }
 
-            /* ── Botão Primário (Instalar) ── */
+            /* ── Botões ── */
             QPushButton#btnPrimary {
-                background: #021BA3;
-                color: #E8E6E0;
-                font-size: 13px;
-                font-weight: 600;
+                background: #0ea5e9;
+                color: #fff;
+                font-size: 14px;
+                font-weight: bold;
                 border: none;
-                border-radius: 4px;
-                padding: 7px 20px;
+                border-radius: 8px;
+                padding: 12px 24px;
             }
-            QPushButton#btnPrimary:hover {
-                background: #1A3FD4;
-            }
-            QPushButton#btnPrimary:pressed {
-                background: #011278;
-            }
-            QPushButton#btnPrimary:disabled {
-                background: #36332E;
-                color: #5C5A55;
-            }
+            QPushButton#btnPrimary:hover  { background: #38bdf8; }
+            QPushButton#btnPrimary:pressed{ background: #0284c7; }
+            QPushButton#btnPrimary:disabled { background: #334155; color: #64748b; }
 
-            /* ── Botão Destrutivo — fundo neutro, SOMENTE fonte vermelha ── */
             QPushButton#btnDanger {
-                background: #242220;
-                color: #D94040;
-                font-size: 13px;
-                font-weight: 700;
-                border: 1px solid #36332E;
-                border-radius: 4px;
-                padding: 7px 20px;
+                background: #dc2626;
+                color: #fff;
+                font-size: 14px;
+                font-weight: bold;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 24px;
             }
-            QPushButton#btnDanger:hover {
-                background: #2E2220;
-                border-color: #D94040;
-                color: #F06060;
-            }
-            QPushButton#btnDanger:pressed {
-                background: #1E1615;
-            }
-            QPushButton#btnDanger:disabled {
-                background: #36332E;
-                color: #5C5A55;
-                border-color: #36332E;
-            }
+            QPushButton#btnDanger:hover  { background: #ef4444; }
+            QPushButton#btnDanger:pressed{ background: #b91c1c; }
+            QPushButton#btnDanger:disabled{ background: #334155; color: #64748b; }
 
-            /* ── Botão Secundário ── */
             QPushButton#btnSecondary {
-                background: transparent;
-                color: #9A978F;
-                border: 1px solid #36332E;
-                border-radius: 4px;
-                padding: 4px 12px;
-                font-weight: 500;
-                font-size: 12px;
-                max-height: 26px;
+                background: #334155;
+                color: #e2e8f0;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 16px;
             }
-            QPushButton#btnSecondary:hover {
-                background: #2A2825;
-                border-color: #A38F00;
-                color: #E8E6E0;
-            }
-            QPushButton#btnSecondary:pressed {
-                background: #1C1B1F;
-            }
-            QPushButton#btnSecondary:disabled {
-                color: #5C5A55;
-            }
+            QPushButton#btnSecondary:hover { background: #475569; }
 
-            /* ── Botão Pequeno ── */
             QPushButton#btnTiny {
-                background: transparent;
-                color: #5C5A55;
-                border: 1px solid #36332E;
-                border-radius: 3px;
-                padding: 3px 10px;
+                background: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 4px 10px;
                 font-size: 11px;
-                font-weight: 500;
             }
-            QPushButton#btnTiny:hover {
-                background: #2A2825;
-                color: #E8E6E0;
-                border-color: #5C5A55;
-            }
+            QPushButton#btnTiny:hover { background: #334155; color: #e2e8f0; }
 
             /* ── Checkboxes de pacotes ── */
             QCheckBox#pkgCheck {
-                spacing: 8px;
-                color: #9A978F;
-                padding: 4px 6px;
-                border-radius: 3px;
+                spacing: 10px;
+                color: #cbd5e1;
+                padding: 5px 8px;
+                border-radius: 4px;
             }
-            QCheckBox#pkgCheck:hover {
-                background: #2A2825;
-                color: #E8E6E0;
-            }
+            QCheckBox#pkgCheck:hover { background: #1e293b; }
             QCheckBox#pkgCheck::indicator {
-                width: 13px; height: 13px;
-                border-radius: 2px;
-                border: 1px solid #36332E;
-                background: #202024;
-            }
-            QCheckBox#pkgCheck::indicator:hover {
-                border-color: #021BA3;
+                width: 16px; height: 16px;
+                border-radius: 3px;
+                border: 1px solid #475569;
+                background: #0f172a;
             }
             QCheckBox#pkgCheck::indicator:checked {
-                background: #021BA3;
-                border-color: #021BA3;
+                background: #0ea5e9;
+                border-color: #0ea5e9;
+                image: none;
             }
 
-            /* ── Checkboxes de opções ── */
             QCheckBox#optCheck {
-                spacing: 7px;
-                color: #5C5A55;
-                font-size: 12px;
+                spacing: 8px;
+                color: #94a3b8;
             }
             QCheckBox#optCheck::indicator {
-                width: 12px; height: 12px;
-                border-radius: 2px;
-                border: 1px solid #36332E;
-                background: #242220;
-            }
-            QCheckBox#optCheck::indicator:hover {
-                border-color: #021BA3;
+                width: 15px; height: 15px;
+                border-radius: 3px;
+                border: 1px solid #475569;
+                background: #1e293b;
             }
             QCheckBox#optCheck::indicator:checked {
-                background: #021BA3;
-                border-color: #021BA3;
+                background: #818cf8;
+                border-color: #818cf8;
             }
 
             /* ── Badge contador ── */
             QLabel#badge {
-                background: #2A2825;
-                color: #9A978F;
+                background: #1e40af;
+                color: #bfdbfe;
                 border-radius: 10px;
                 padding: 2px 10px;
                 font-size: 11px;
-                font-weight: 600;
+                font-weight: bold;
             }
 
-            /* ── Hints ── */
             QLabel#hint {
-                color: #5C5A55;
-                font-size: 11px;
+                color: #64748b;
+                font-size: 12px;
             }
 
             /* ── Scroll ── */
             QScrollArea#pkgScroll {
-                border: 1px solid #36332E;
-                border-radius: 4px;
-                background: #202024;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                background: #080f1e;
             }
             QScrollBar:vertical {
-                background: #202024;
-                width: 6px;
-                border-radius: 3px;
+                background: #1e293b;
+                width: 8px;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #36332E;
-                border-radius: 3px;
+                background: #475569;
+                border-radius: 4px;
                 min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #5C5A55;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
-            }
-
-            /* ── Tooltips ── */
-            QToolTip {
-                background: #242320;
-                color: #E8E6E0;
-                border: 1px solid #A38F00;
-                border-radius: 3px;
-                padding: 5px 8px;
-                font-size: 11px;
             }
         """)
 
